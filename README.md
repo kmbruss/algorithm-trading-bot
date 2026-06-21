@@ -1,26 +1,42 @@
-# Algorithmic Trading Bot (Paper Trading)
+# Algorithmic Trading Bot: A Backtesting Research Project
 
-A backtesting and signal-generation framework for systematic trading strategies, built on Alpaca's market data API. Implements and compares moving average crossover variants on both single tickers and a multi-asset portfolio with dynamic, volatility-based capital allocation.
+**Question investigated:** Can simple technical filters (RSI, 200-day trend confirmation) improve on a basic moving-average crossover strategy — and can either approach beat passive buy-and-hold — across individual stocks and a volatility-weighted multi-asset portfolio?
+
+**Short answer: no.** Across 10 independent tests (9 single tickers + 1 ten-stock portfolio), buy-and-hold beat every active strategy variant every time but one. This is consistent with market efficiency and a sustained bull market over the test period, not a flaw in the implementation — see Results below for the full breakdown and Why This Still Matters for what the project actually demonstrates.
 
 ## What this does
 
 - Pulls historical daily price data for any stock ticker via Alpaca's API
 - Backtests a **20-day / 50-day moving average crossover** strategy (long-only)
 - Compares it against the same strategy with an **RSI filter** layered on top
-- Includes a **200-day trend filter** variant (buy-side only) — currently disabled by default, see note below
-- Runs a **multi-asset portfolio backtest** that allocates capital across tickers using **inverse-volatility weighting** (calmer tickers get more capital, volatile ones get less), with volatility measured on a separate training window to avoid lookahead bias
-- Benchmarks every strategy against a simple **buy-and-hold** baseline
-- Prints comparison tables and full trade logs
+- Includes a **200-day trend filter** variant (buy-side only) — built and verified correct, but excluded from the default run; see Known Limitations
+- Runs a **multi-asset portfolio backtest** allocating capital across tickers via **inverse-volatility weighting** (calmer tickers get more capital), with volatility measured on a separate training window to avoid lookahead bias
+- Benchmarks every strategy against simple **buy-and-hold**
 
-## Key findings
+## Results
 
-**RSI filtering is not a reliable net-positive.** Tested across SPY, AAPL, TSLA, NIO, and a 10-stock blue-chip basket (MSFT, JPM, XOM, JNJ, PG, KO, WMT, DIS, CAT, V): RSI helps on some tickers (blocks bad late entries, e.g. TSLA) and hurts on others (blocks the single best trade of the period, e.g. SPY, NIO, JNJ). No consistent edge — MA crossover is trend-following, while RSI overbought/oversold is fundamentally mean-reversion, so the two signals sometimes fight each other.
+| Ticker | Plain MA | MA + RSI | Buy & Hold | Either beat B&H? |
+|---|---|---|---|---|
+| SPY | 12.09% | 6.35% | 25.65% | No |
+| SPY (2nd window) | 21.30% | 15.08% | 30.08% | No |
+| NIO | 9.08% | 1.10% | 47.21% | No |
+| AAPL | 15.98% | 29.73% | 47.90% | No |
+| TSLA | 2.38% | 22.32% | 14.86% | **RSI only** |
+| TSLA (2nd window) | -10.48% | 6.96% | 43.86% | No |
+| MSFT | -10.77% | -22.18% | -3.48% | No |
+| JPM | 5.55% | 12.15% | 31.11% | No |
+| **10-stock portfolio** (MSFT, JPM, XOM, JNJ, PG, KO, WMT, DIS, CAT, V), volatility-weighted | 8.20% | 5.70% | 18.27% | No |
 
-**Buy-and-hold outperformed every active strategy in every single test**, often by a wide margin. This reflects a real, sustained uptrend across most tested tickers during the backtest period — a reminder that timing entries/exits has a real cost when markets are trending steadily upward, and any time spent out of position to "avoid risk" also means missing gains.
+**Score: buy-and-hold won 9 out of 10 tests.** Plain MA crossover never won. RSI-filtered crossover won exactly once.
 
-**One outlier stock can dominate a small portfolio.** An early multi-asset test included MU (Micron), which had a genuine, extreme real-world rally (windows around 300-980%+ depending on the test window, driven by an AI-memory-chip demand surge) that swamped the entire portfolio's results, making the basket's performance say more about MU specifically than about the strategy. Lesson: verify extreme results are real before trusting them (checked via news search, confirmed legitimate), and use a broad, diversified basket so no single stock dominates the read.
+## Why this still matters
 
-**The 200-day trend filter is currently disabled — confirmed unfair to test with the current data window.** The filter requires 200 days of price history before it can produce a value at all; with the current 455-day fetch window (90-day training + 365-day test), the filter spent most or all of the test period unable to act, rather than genuinely judging trend direction. Verified this is a data-availability artifact (not a real trend rejection) by checking exact `trend_ma` values on blocked trades, and confirmed the pattern was consistent across 5 different tickers — in one case (MSFT) the filter never placed a single trade in the entire test window. The function (`generate_signals_trend_filtered`) is kept in the code but excluded from the default run. Revisiting this would require a meaningfully longer fetch window so the 200-day MA is already warmed up before the test period begins.
+A strategy that doesn't beat the market isn't a failed project — it's an expected, well-documented result, and producing it credibly requires real engineering:
+
+- **RSI and MA crossover are philosophically opposed signals.** MA crossover is trend-following; RSI overbought/oversold is mean-reversion. Stacking them means the filter sometimes blocks the exact trade that would have worked (confirmed on SPY, NIO, JNJ) and sometimes correctly avoids a bad late entry (confirmed on TSLA). There's no consistent edge because the two signals are answering different questions.
+- **One outlier can dominate a small portfolio.** An early multi-asset test included MU (Micron), which had a genuine ~300-980% real-world rally driven by AI-memory-chip demand. This swamped the whole portfolio's result. Confirmed via news search that the move was real, not a data bug — then excluded it in favor of a diversified basket where no single stock dominates the read.
+- **Lookahead bias is easy to introduce by accident.** The portfolio's volatility weights are calculated on a 90-day training window strictly before the test window begins, so allocation never uses information that wouldn't have been available at the time.
+- **Not every promising idea survives contact with real data.** The 200-day trend filter looked reasonable in design but, when tested across 5 tickers, was confirmed (by inspecting actual `trend_ma` values, not just final returns) to be mostly blocked by insufficient warm-up history rather than genuine trend rejection — in one case (MSFT) it placed zero trades in the entire test window. Recognizing and documenting that an idea needs more infrastructure before it can be fairly evaluated, rather than reporting a misleading result, is itself the point of doing this rigorously.
 
 ## Setup
 
@@ -61,7 +77,7 @@ Prompts for one ticker symbol, runs plain MA crossover and RSI-filtered variants
 ```bash
 python portfolio_backtest.py
 ```
-Prompts for multiple ticker symbols one at a time (type `done` when finished). Splits each ticker's data into a 90-day training window (volatility calculation only) and the remaining test window (actual backtest). Allocates a $10,000 total starting balance across tickers using inverse-volatility weighting, runs plain and RSI-filtered strategies per ticker, and reports both per-ticker and portfolio-level results.
+Prompts for multiple ticker symbols one at a time (type `done` when finished). Splits each ticker's data into a 90-day training window (volatility calculation only) and the remaining test window (actual backtest). Allocates a $10,000 total starting balance across tickers using inverse-volatility weighting, runs plain and RSI-filtered strategies per ticker, and reports per-ticker and portfolio-level results.
 
 Note: data CSVs are not committed to this repo (regenerated on demand via `fetch_data.py`) — see `.gitignore`.
 
@@ -78,10 +94,11 @@ data/                  # Generated CSVs (gitignored, not committed)
 
 ## Known limitations
 
-- No transaction costs or slippage modeled — real trading would erode returns, especially for strategies with many trades (one 10-ticker test produced 43 trades/year for plain crossover)
+- No transaction costs or slippage modeled — real trading would erode returns further, especially for strategies with many trades (one 10-ticker test produced 43 trades/year for plain crossover)
 - Volatility allocation weights are static for the whole backtest, not periodically rebalanced
-- 200-day trend filter needs a longer fetch window to be evaluated fairly (see Key Findings)
-- Single-asset volatility weighting ignores correlation between tickers — true risk parity would account for how assets move together, not just their individual volatility
+- 200-day trend filter needs a longer fetch window to be evaluated fairly (see Why This Still Matters)
+- Volatility weighting treats each ticker independently and ignores correlation between assets — true risk parity would account for how assets move together, not just their individual volatility
+- All testing covers a single, strongly bullish ~1-year window; results may not generalize to bear or sideways markets
 
 ## Roadmap
 
