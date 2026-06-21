@@ -11,10 +11,11 @@ load_dotenv()
 API_KEY = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 
-def fetch_daily_bars(symbol: str, days_back: int = 365) -> pd.DataFrame:
+def fetch_daily_bars(symbol: str, days_back: int = 365, end_date: datetime = None) -> pd.DataFrame:
     client = StockHistoricalDataClient(API_KEY, SECRET_KEY)
-    end = datetime.now()
+    end = end_date if end_date is not None else datetime.now()
     start = end - timedelta(days=days_back)
+    
     request = StockBarsRequest(
         symbol_or_symbols=symbol,
         timeframe=TimeFrame.Day,
@@ -37,12 +38,15 @@ if __name__ == "__main__":
         if user_input:
             symbols.append(user_input)
 
+    end_date_input = input("End date for data (YYYY-MM-DD, or leave blank for today): ").strip()
+    end_date = datetime.strptime(end_date_input, "%Y-%m-%d") if end_date_input else None
+
     for symbol in symbols:
         print(f"\nFetching {symbol} daily bars...")
 
         # 455 days = 90 days of training history (for volatility weighting)
         # + 365 days of actual backtest window
-        df = fetch_daily_bars(symbol, days_back=455)
+        df = fetch_daily_bars(symbol, days_back=455, end_date=end_date)
 
         print(df.head())
         print(f"Total rows: {len(df)}")

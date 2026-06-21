@@ -141,6 +141,62 @@ def simulate_trades(df: pd.DataFrame, starting_cash: float = 10000.0) -> dict:
     }
 
 
+def simulate_trades_long_short(df: pd.DataFrame, starting_cash: float = 10000) -> dict:
+    """
+    Same as simulate_trades(), but allows short positions instead of just
+    exiting to cash on a death cross. This is a "stop-and-reverse" strategy:
+    every crossover flips the position from long to short or vice versa.
+
+    Tracks three possible states: long (own shares), short (owe shares,
+    holding the cash from selling them), or flat (only used at the very
+    start, before the first signal).
+    """
+    cash = starting_cash
+    shares_long = 0
+    shares_short = 0
+    trade_log = []
+
+    for date, row in df.iterrows():
+        price = row["close"]
+
+        if row["position_change"] == 1:
+            if shares_short > 0:
+                cost_to_cover = shares_short * price
+                cash -= cost_to_cover
+                trade_log.append({"date": date, "action": "COVER_SHORT", "price": price, "shares": shares_short})
+                shares_short = 0
+            if shares_long == 0:
+                shares_long = cash / price
+                cash = 0
+                trade_log.append({"date": date, "action": "BUY", "price": price, "shares": shares_long})
+       
+        elif row["position_change"] == -1:
+            if shares_long > 0:
+                cash = shares_long * price
+                trade_log.append({"date": date, "action": "SELL", "price": price, "shares": shares_long})
+                shares_long = 0
+            
+            if shares_short == 0:
+                shares_short = cash / price
+                cash += shares_short * price
+                trade_log.append({"date": date, "action": "SHORT", "price": price, "shares": shares_short})
+
+        final_price = df["close"].iloc[-1]
+        if shares_long > 0:
+            final_value = cash + (shares_long * final_price)
+        elif shares_short > 0:
+            final_value = cash - (shares_short * final_price)
+        else:
+            final_value = cash
+
+    return {
+    "starting_cash": starting_cash,
+    "final_value": final_value,
+    "total_return_pct": (final_value - starting_cash) / starting_cash * 100,
+    "num_trades": len(trade_log),
+    "trade_log": trade_log,
+    }
+
 def buy_and_hold_baseline(df: pd.DataFrame, starting_cash: float = 10000.0) -> dict:
     """
     Baseline comparison: what if you just bought on day 1 and held
@@ -157,6 +213,8 @@ def buy_and_hold_baseline(df: pd.DataFrame, starting_cash: float = 10000.0) -> d
         "total_return_pct": (final_value - starting_cash) / starting_cash * 100,
     }
 
+
+
 if __name__ == "__main__":
     symbol = input("Enter ticker symbol (default SPY): ").strip().upper() or "SPY"
     starting_cash = 10000.0
@@ -172,6 +230,7 @@ if __name__ == "__main__":
     plain_results = simulate_trades(plain_df, starting_cash=starting_cash)
     rsi_results = simulate_trades(rsi_df, starting_cash=starting_cash)
     #trend_results = simulate_trades(trend_df, starting_cash=starting_cash)
+    long_short_results = simulate_trades_long_short(plain_df, starting_cash=starting_cash)
     baseline = buy_and_hold_baseline(base_df, starting_cash=starting_cash)
 
     print(f"\n{'Strategy':<25} {'Final Value':>15} {'Return %':>10} {'# Trades':>10}")
@@ -179,6 +238,7 @@ if __name__ == "__main__":
     print(f"{'MA Crossover (plain)':<25} ${plain_results['final_value']:>13,.2f} {plain_results['total_return_pct']:>9.2f}% {plain_results['num_trades']:>10}")
     print(f"{'MA Crossover + RSI':<25} ${rsi_results['final_value']:>13,.2f} {rsi_results['total_return_pct']:>9.2f}% {rsi_results['num_trades']:>10}")
     #print(f"{'MA Crossover + Trend':<25} ${trend_results['final_value']:>13,.2f} {trend_results['total_return_pct']:>9.2f}% {trend_results['num_trades']:>10}")
+    print(f"{'MA Crossover (long/short)':<25} ${long_short_results['final_value']:>13,.2f} {long_short_results['total_return_pct']:>9.2f}% {long_short_results['num_trades']:>10}")
     print(f"{'Buy & Hold':<25} ${baseline['final_value']:>13,.2f} {baseline['total_return_pct']:>9.2f}% {'-':>10}")
 
     print(f"\n--- Plain MA Crossover trades ---")

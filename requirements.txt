@@ -2,3 +2,5 @@ alpaca-py
 pandas
 python-dotenv
 matplotlib
+streamlit
+streamlit-autorefresh
