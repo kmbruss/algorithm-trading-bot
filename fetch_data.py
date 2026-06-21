@@ -26,14 +26,27 @@ def fetch_daily_bars(symbol: str, days_back: int = 365) -> pd.DataFrame:
     return df
 
 if __name__ == "__main__":
-    symbol = input("Enter ticker symbol (default SPY): ").strip().upper() or "SPY"
-    print(f"Fetching {symbol} daily bars...")
+    symbols = []
+    while True:
+        user_input = input("Enter ticker symbol (or 'done' to finish): ").strip().upper()
+        if user_input == "DONE":
+            if not symbols:
+                print("you haven't entered any tickers yet")
+                continue
+            break
+        if user_input:
+            symbols.append(user_input)
 
-    df = fetch_daily_bars(symbol, days_back=365)
+    for symbol in symbols:
+        print(f"\nFetching {symbol} daily bars...")
 
-    print(df.head())
-    print(f"\nTotal rows: {len(df)}")
+        # 455 days = 90 days of training history (for volatility weighting)
+        # + 365 days of actual backtest window
+        df = fetch_daily_bars(symbol, days_back=455)
 
-    output_path = f"{symbol}_daily.csv"
-    df.to_csv(output_path)
-    print(f"Saved to {output_path}")
+        print(df.head())
+        print(f"Total rows: {len(df)}")
+
+        output_path = f"data/{symbol}_daily.csv"
+        df.to_csv(output_path)
+        print(f"Saved to {output_path}")

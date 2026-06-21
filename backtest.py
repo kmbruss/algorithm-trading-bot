@@ -15,13 +15,14 @@ def load_data(csv_path: str) -> pd.DataFrame:
     return df
 
 
-def add_moving_averages(df: pd.DataFrame, short_window: int = 20, long_window: int = 50) -> pd.DataFrame:
+def add_moving_averages(df: pd.DataFrame, short_window: int = 20, long_window: int = 50, trend_window: int = 200) -> pd.DataFrame:
     """
     Add short and long moving average columns to the DataFrame.
     Uses closing price as the basis for the average.
     """
     df["short_ma"] = df["close"].rolling(window=short_window).mean()
     df["long_ma"] = df["close"].rolling(window=long_window).mean()
+    df["trend_ma"] = df["close"].rolling(window=trend_window).mean()
     return df
 
 
@@ -80,6 +81,31 @@ def generate_signals_rsi_filtered(df: pd.DataFrame, rsi_overbought: float = 70, 
 
     return df
 
+#unused
+def generate_signals_trend_filtered(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Variant 3: MA crossover with a 200-day trend filter on the BUY side only.
+
+    Same crossover logic as the plain version, but:
+        - Suppress a buy signal unless price is also above the 200-day MA
+          (i.e. only buy if we're in a confirmed longer-term uptrend)
+
+    Sell signals are untouched -- exits happen on every death cross
+    regardless of where price sits relative to the 200-day MA.
+    """
+    df = df.copy()
+    df["signal"] = 0
+    df.loc[df["short_ma"] > df["long_ma"], "signal"] = 1
+    df["position_change"] = df["signal"].diff()
+
+    # Suppress buy signals where price is below the 200-day trend MA,
+    # or where the trend MA isn't available yet (not enough history).
+    buy_against_trend = (df["position_change"] == 1) & (
+        (df["close"] < df["trend_ma"]) | df["trend_ma"].isna()
+    )
+    df.loc[buy_against_trend, "position_change"] = 0
+
+    return df
 
 def simulate_trades(df: pd.DataFrame, starting_cash: float = 10000.0) -> dict:
     """
@@ -131,31 +157,30 @@ def buy_and_hold_baseline(df: pd.DataFrame, starting_cash: float = 10000.0) -> d
         "total_return_pct": (final_value - starting_cash) / starting_cash * 100,
     }
 
-
 if __name__ == "__main__":
     symbol = input("Enter ticker symbol (default SPY): ").strip().upper() or "SPY"
     starting_cash = 10000.0
 
-    base_df = load_data(f"{symbol}_daily.csv")
-    base_df = add_moving_averages(base_df, short_window=20, long_window=50)
+    base_df = load_data(f"data/{symbol}_daily.csv")
+    base_df = add_moving_averages(base_df, short_window=20, long_window=50, trend_window=200)
     base_df = add_rsi(base_df, window=14)
 
-    # Run each strategy variant on its own copy of the data
     plain_df = generate_signals_plain(base_df)
     rsi_df = generate_signals_rsi_filtered(base_df, rsi_overbought=70, rsi_oversold=30)
+    #trend_df = generate_signals_trend_filtered(base_df)
 
     plain_results = simulate_trades(plain_df, starting_cash=starting_cash)
     rsi_results = simulate_trades(rsi_df, starting_cash=starting_cash)
+    #trend_results = simulate_trades(trend_df, starting_cash=starting_cash)
     baseline = buy_and_hold_baseline(base_df, starting_cash=starting_cash)
 
-    # --- Comparison table ---
     print(f"\n{'Strategy':<25} {'Final Value':>15} {'Return %':>10} {'# Trades':>10}")
     print("-" * 62)
     print(f"{'MA Crossover (plain)':<25} ${plain_results['final_value']:>13,.2f} {plain_results['total_return_pct']:>9.2f}% {plain_results['num_trades']:>10}")
     print(f"{'MA Crossover + RSI':<25} ${rsi_results['final_value']:>13,.2f} {rsi_results['total_return_pct']:>9.2f}% {rsi_results['num_trades']:>10}")
+    #print(f"{'MA Crossover + Trend':<25} ${trend_results['final_value']:>13,.2f} {trend_results['total_return_pct']:>9.2f}% {trend_results['num_trades']:>10}")
     print(f"{'Buy & Hold':<25} ${baseline['final_value']:>13,.2f} {baseline['total_return_pct']:>9.2f}% {'-':>10}")
 
-    # --- Trade logs for the two active strategies ---
     print(f"\n--- Plain MA Crossover trades ---")
     for trade in plain_results["trade_log"]:
         print(f"{trade['date'].date()}  {trade['action']:4s}  price=${trade['price']:.2f}")
@@ -163,3 +188,7 @@ if __name__ == "__main__":
     print(f"\n--- RSI-filtered trades ---")
     for trade in rsi_results["trade_log"]:
         print(f"{trade['date'].date()}  {trade['action']:4s}  price=${trade['price']:.2f}")
+
+    # print(f"\n--- Trend-filtered trades ---")
+    # for trade in trend_results["trade_log"]:
+    #     print(f"{trade['date'].date()}  {trade['action']:4s}  price=${trade['price']:.2f}")
